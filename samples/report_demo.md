@@ -12,9 +12,9 @@
 
 | Check | Statistic | p-value | Verdict |
 | --- | ---: | ---: | --- |
-| Shapiro-Wilk (A) | 0.971064159347552 | 0.609397687670936 | consistent with normality |
-| Shapiro-Wilk (B) | 0.324800667725172 | 7.5801870371779e-11 | not consistent with normality |
-| Levene (equal variance) | 1.37517857421885 | 0.245801764522923 | equal variance |
+| Shapiro-Wilk (A) | 0.9711 | 0.6094 | consistent with normality |
+| Shapiro-Wilk (B) | 0.3248 | 7.580e-11 | not consistent with normality |
+| Levene (equal variance) | 1.375 | 0.2458 | equal variance |
 
 ## Chosen test and reason
 
@@ -24,13 +24,13 @@
 ## Result
 
 - **Statistic:** 44
-- **p-value:** 3.37192303356722e-09
-- **Effect size:** rank-biserial correlation = -0.898617511520737
+- **p-value:** 3.372e-09
+- **Effect size:** rank-biserial correlation = -0.8986
 - **Group sizes:** A=28; B=31
 
 ## Interpretation
 
-The Mann-Whitney returned a p-value of 3.37192303356722e-09. The result provides evidence of difference between the groups at the 0.05 level.
+The observed difference between the groups was a higher median in group B (84.2) than group A (73), with a p-value of 3.372e-09. The rank-biserial correlation was -0.8986, indicating a large effect, and a small p-value alone does not show practical importance.
 
 ## Reproduce
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import os
 import shlex
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,7 @@ def build_report(csv_path: str | Path, mode: str, params: dict[str, str]) -> str
         lines.extend(["## Assumption checks", "", _numeric_assumptions_table(assumptions), ""])
         reproduce = _numeric_reproduction(csv_path, group_col, value_col, result["scipy_call"])
         command = _cli_command(csv_path, "numeric", group=group_col, value=value_col)
+        interpretation_columns = (group_col, value_col)
         subject = "difference between the groups"
     else:
         cat1 = _required_param(params, "cat1")
@@ -52,6 +54,7 @@ def build_report(csv_path: str | Path, mode: str, params: dict[str, str]) -> str
         lines.extend(["## Assumption checks", "", _categorical_assumptions_table(frame, cat1, cat2), ""])
         reproduce = _categorical_reproduction(csv_path, cat1, cat2, result["scipy_call"])
         command = _cli_command(csv_path, "categorical", cat1=cat1, cat2=cat2)
+        interpretation_columns = (cat1, cat2)
         subject = "association between the categorical variables"
 
     lines.extend(
@@ -64,14 +67,21 @@ def build_report(csv_path: str | Path, mode: str, params: dict[str, str]) -> str
             "## Result",
             "",
             f"- **Statistic:** {_format_value(result.get('statistic'))}",
-            f"- **p-value:** {_format_value(result.get('p_value'))}",
+            f"- **p-value:** {_format_value(result.get('p_value'), p_value=True)}",
             f"- **Effect size:** {result.get('effect_size_name', 'effect size')} = "
             f"{_format_value(result.get('effect_size'))}",
             f"- **Group sizes:** {_format_mapping(result.get('group_sizes', {}))}",
             "",
             "## Interpretation",
             "",
-            _interpretation(result.get("p_value"), selection["test"], subject),
+            _interpretation(
+                result.get("p_value"),
+                selection["test"],
+                subject,
+                result=result,
+                frame=frame,
+                columns=interpretation_columns,
+            ),
             "",
             "## Reproduce",
             "",
@@ -97,10 +107,10 @@ def _summary_table(summary: dict[str, Any]) -> str:
     for name, details in summary["columns"].items():
         rows.append(
             f"| {_escape(name)} | {_escape(details['type'])} | "
-            f"{details['missing']} | {details['outliers']} |"
+            f"{_format_value(details['missing'])} | {_format_value(details['outliers'])} |"
         )
     rows.append("")
-    rows.append(f"**Duplicate rows:** {summary['duplicate_rows']}")
+    rows.append(f"**Duplicate rows:** {_format_value(summary['duplicate_rows'])}")
     return "\n".join(rows)
 
 
@@ -110,13 +120,13 @@ def _numeric_assumptions_table(assumptions: dict[str, Any]) -> str:
         verdict = _verdict(details.get("normal"), "consistent with normality", "not consistent with normality")
         rows.append(
             f"| Shapiro-Wilk ({_escape(group)}) | {_format_value(details.get('statistic'))} | "
-            f"{_format_value(details.get('p_value'))} | {verdict} |"
+            f"{_format_value(details.get('p_value'), p_value=True)} | {verdict} |"
         )
     levene = assumptions["levene"]
     verdict = _verdict(levene.get("equal_variance"), "equal variance", "unequal variance")
     rows.append(
         f"| Levene (equal variance) | {_format_value(levene.get('statistic'))} | "
-        f"{_format_value(levene.get('p_value'))} | {verdict} |"
+        f"{_format_value(levene.get('p_value'), p_value=True)} | {verdict} |"
     )
     return "\n".join(rows)
 
@@ -126,7 +136,8 @@ def _categorical_assumptions_table(frame: pd.DataFrame, cat1: str, cat2: str) ->
     table = pd.crosstab(clean[cat1], clean[cat2])
     rows = ["| Check | Statistic | p-value | Verdict |", "| --- | ---: | ---: | --- |"]
     rows.append(
-        f"| Contingency table | {table.shape[0]} x {table.shape[1]} ({len(clean)} complete rows) | "
+        f"| Contingency table | {_format_value(table.shape[0])} x {_format_value(table.shape[1])} "
+        f"({_format_value(len(clean))} complete rows) | "
         f"n/a | {'usable' if table.shape[0] >= 2 and table.shape[1] >= 2 else 'fewer than two levels'} |"
     )
 
@@ -143,7 +154,11 @@ def _categorical_assumptions_table(frame: pd.DataFrame, cat1: str, cat2: str) ->
         minimum = float(expected.min())
         low_count = int((expected < 5).sum())
         statistic = f"minimum expected count = {_format_value(minimum)}"
-        verdict = "all expected counts >= 5" if low_count == 0 else f"{low_count} expected count(s) < 5"
+        verdict = (
+            "all expected counts >= 5"
+            if low_count == 0
+            else f"{_format_value(low_count)} expected count(s) < 5"
+        )
     rows.append(f"| Expected counts | {statistic} | n/a | {verdict} |")
     return "\n".join(rows)
 
@@ -154,13 +169,104 @@ def _verdict(value: bool | None, passed: str, failed: str) -> str:
     return passed if value else failed
 
 
-def _interpretation(p_value: Any, test_name: str, subject: str) -> str:
-    formatted = _format_value(p_value)
-    if p_value is not None and float(p_value) < 0.05:
-        conclusion = f"The result provides evidence of {subject} at the 0.05 level."
+def _interpretation(
+    p_value: Any,
+    test_name: str,
+    subject: str,
+    *,
+    result: dict[str, Any] | None = None,
+    frame: pd.DataFrame | None = None,
+    columns: tuple[str, str] | None = None,
+) -> str:
+    """Describe the observed direction and practical size in exactly two sentences."""
+    result = result or {}
+    formatted_p = _format_value(p_value, p_value=True)
+    effect_name = str(result.get("effect_size_name", "effect size"))
+    effect = result.get("effect_size")
+    effect_magnitude = _effect_magnitude(effect_name, effect)
+
+    if frame is not None and columns is not None:
+        if test_name in {"t-test", "Welch", "Mann-Whitney", "ANOVA", "Kruskal-Wallis"}:
+            direction = _numeric_direction(frame, columns[0], columns[1], test_name)
+        else:
+            direction = _categorical_direction(frame, columns[0], columns[1])
     else:
-        conclusion = f"The result does not provide sufficient evidence of {subject} at the 0.05 level."
-    return f"The {test_name} returned a p-value of {formatted}. {conclusion}"
+        direction = subject
+
+    first = f"The observed {subject} was {direction}, with a p-value of {formatted_p}."
+    second = (
+        f"The {effect_name} was {_format_value(effect)}, indicating a {effect_magnitude} effect, "
+        "and a small p-value alone does not show practical importance."
+    )
+    return f"{first} {second}"
+
+
+def _numeric_direction(frame: pd.DataFrame, group_col: str, value_col: str, test_name: str) -> str:
+    clean = frame[[group_col, value_col]].dropna()
+    measure_name = "median" if test_name in {"Mann-Whitney", "Kruskal-Wallis"} else "mean"
+    summaries: list[tuple[Any, float]] = []
+    for label in pd.unique(clean[group_col]):
+        values = clean.loc[clean[group_col] == label, value_col].astype(float)
+        if values.empty:
+            continue
+        measure = values.median() if measure_name == "median" else values.mean()
+        summaries.append((label, float(measure)))
+
+    if not summaries:
+        return f"no {measure_name} values were available for the groups"
+    highest = max(summaries, key=lambda item: item[1])
+    lowest = min(summaries, key=lambda item: item[1])
+    if math.isclose(highest[1], lowest[1]):
+        return f"equal {measure_name}s across groups ({_format_value(highest[1])})"
+    if len(summaries) == 2:
+        return (
+            f"a higher {measure_name} in group {_label(highest[0])} "
+            f"({_format_value(highest[1])}) than group {_label(lowest[0])} "
+            f"({_format_value(lowest[1])})"
+        )
+    return (
+        f"the highest {measure_name} in group {_label(highest[0])} "
+        f"({_format_value(highest[1])}) and the lowest in group {_label(lowest[0])} "
+        f"({_format_value(lowest[1])})"
+    )
+
+
+def _categorical_direction(frame: pd.DataFrame, cat1: str, cat2: str) -> str:
+    clean = frame[[cat1, cat2]].dropna()
+    table = pd.crosstab(clean[cat1], clean[cat2])
+    if table.empty:
+        return "no categorical pairing was available"
+    row, column = table.stack().idxmax()
+    count = table.loc[row, column]
+    return (
+        f"a pattern with {_escape(cat1)}={_label(row)} and "
+        f"{_escape(cat2)}={_label(column)} as the most common pairing "
+        f"({_format_value(count)} observations)"
+    )
+
+
+def _effect_magnitude(effect_name: str, effect: Any) -> str:
+    try:
+        absolute_effect = abs(float(effect))
+    except (TypeError, ValueError):
+        return "unavailable"
+    if not math.isfinite(absolute_effect):
+        return "unavailable"
+
+    normalized_name = effect_name.lower().replace("‑", "-")
+    if "cohen" in normalized_name:
+        thresholds = (0.2, 0.5, 0.8)
+    elif "cram" in normalized_name or "rank-biserial" in normalized_name or "rank biserial" in normalized_name:
+        thresholds = (0.1, 0.3, 0.5)
+    else:
+        thresholds = (0.01, 0.06, 0.14)
+    if absolute_effect < thresholds[0]:
+        return "negligible"
+    if absolute_effect < thresholds[1]:
+        return "small"
+    if absolute_effect < thresholds[2]:
+        return "medium"
+    return "large"
 
 
 def _numeric_reproduction(csv_path: str | Path, group_col: str, value_col: str, call: str) -> str:
@@ -178,7 +284,7 @@ def _numeric_reproduction(csv_path: str | Path, group_col: str, value_col: str, 
         "import pandas as pd",
         "import scipy",
         "",
-        f"frame = pd.read_csv({str(csv_path)!r})",
+        f"frame = pd.read_csv({_relative_csv_path(csv_path)!r})",
         f"clean = frame[[{group_col!r}, {value_col!r}]].dropna()",
         f"groups = [clean.loc[clean[{group_col!r}] == label, {value_col!r}].astype(float).to_numpy() "
         "for label in pd.unique(clean[" + repr(group_col) + "])]",
@@ -203,7 +309,7 @@ def _categorical_reproduction(csv_path: str | Path, cat1: str, cat2: str, call: 
             "import pandas as pd",
             "import scipy",
             "",
-            f"frame = pd.read_csv({str(csv_path)!r})",
+            f"frame = pd.read_csv({_relative_csv_path(csv_path)!r})",
             f"clean = frame[[{cat1!r}, {cat2!r}]].dropna()",
             f"contingency_table = pd.crosstab(clean[{cat1!r}], clean[{cat2!r}])",
             test_code,
@@ -213,7 +319,7 @@ def _categorical_reproduction(csv_path: str | Path, cat1: str, cat2: str, call: 
 
 
 def _cli_command(csv_path: str | Path, mode: str, **params: str) -> str:
-    command = ["statguard", "analyze", str(csv_path)]
+    command = ["statguard", "analyze", _relative_csv_path(csv_path)]
     if mode == "numeric":
         command.extend(["--group", params["group"], "--value", params["value"]])
     else:
@@ -227,7 +333,7 @@ def _format_mapping(value: Any) -> str:
     return _format_value(value)
 
 
-def _format_value(value: Any) -> str:
+def _format_value(value: Any, *, p_value: bool = False) -> str:
     if value is None:
         return "n/a"
     try:
@@ -236,7 +342,19 @@ def _format_value(value: Any) -> str:
         return _escape(value)
     if not math.isfinite(numeric):
         return "n/a"
-    return f"{numeric:.15g}"
+    if p_value and abs(numeric) < 0.0001:
+        return f"{numeric:.3e}"
+    return f"{numeric:.4g}"
+
+
+def _relative_csv_path(csv_path: str | Path) -> str:
+    """Return a path usable from the current workspace without an absolute prefix."""
+    return os.path.relpath(str(csv_path), start=str(Path.cwd()))
+
+
+def _label(value: Any) -> str:
+    """Render a group/category label as text rather than as a numeric measure."""
+    return _escape(value)
 
 
 def _escape(value: Any) -> str:

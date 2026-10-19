@@ -58,7 +58,7 @@ def test_numeric_report_has_required_sections_and_reproduces_result(tmp_path):
     exec(_reproduction_code(report), namespace)
 
     assert namespace["result"].pvalue == pytest.approx(expected["p_value"])
-    assert _reported_p_value(report) == pytest.approx(expected["p_value"])
+    assert _reported_p_value(report) == pytest.approx(expected["p_value"], rel=1e-4, abs=1e-12)
 
 
 def test_categorical_report_has_expected_count_check_and_reproduces_result(tmp_path):
@@ -82,4 +82,4 @@ def test_categorical_report_has_expected_count_check_and_reproduces_result(tmp_p
     exec(_reproduction_code(report), namespace)
 
     assert namespace["result"].pvalue == pytest.approx(expected["p_value"])
-    assert _reported_p_value(report) == pytest.approx(expected["p_value"])
+    assert _reported_p_value(report) == pytest.approx(expected["p_value"], rel=1e-4, abs=1e-12)

@@ -28,7 +28,7 @@
 
 ## Interpretation
 
-The Fisher returned a p-value of 1. The result does not provide sufficient evidence of association between the categorical variables at the 0.05 level.
+The observed association between the categorical variables was a pattern with region=North and preference=Tea as the most common pairing (8 observations), with a p-value of 1. The Cramér's V was 0, indicating a negligible effect, and a small p-value alone does not show practical importance.
 
 ## Reproduce
 
