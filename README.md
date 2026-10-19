@@ -1,5 +1,7 @@
 # StatGuard
 
+[![CI](https://github.com/rahul59294/StatGuard/actions/workflows/ci.yml/badge.svg)](https://github.com/rahul59294/StatGuard/actions/workflows/ci.yml)
+
 A local-first CLI that profiles a CSV, checks statistical assumptions, selects and runs an appropriate test, and explains the result in a reproducible Markdown report. StatGuard is intentionally small and runs locally with no API keys or network calls.
 
 ## Setup
