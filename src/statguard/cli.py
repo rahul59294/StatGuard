@@ -7,6 +7,7 @@ import pandas as pd
 import typer
 
 from .assumptions import check_numeric_assumptions
+from .report import build_report
 from .run import run_categorical_test, run_numeric_test
 from .select import select_categorical_test, select_numeric_test
 
@@ -122,6 +123,18 @@ def _validate_columns(frame: pd.DataFrame, columns: list[str]) -> None:
         raise typer.BadParameter(f"Column(s) not found in CSV: {', '.join(missing)}")
 
 
+def _write_report(csv: Path, mode: str, params: dict[str, str], output: Path) -> None:
+    """Build and write a Markdown report, translating path failures for Typer."""
+    report = build_report(csv, mode, params)
+    try:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(report, encoding="utf-8")
+    except OSError as exc:
+        raise typer.BadParameter(
+            f"Could not write report to '{output}': {exc}", param_hint="--out"
+        ) from exc
+
+
 @app.command("analyze")
 def analyze_csv(
     csv: Path = typer.Argument(..., exists=True, readable=True, dir_okay=False),
@@ -129,6 +142,7 @@ def analyze_csv(
     value: str | None = typer.Option(None, "--value", help="Numeric value column."),
     cat1: str | None = typer.Option(None, "--cat1", help="First categorical column."),
     cat2: str | None = typer.Option(None, "--cat2", help="Second categorical column."),
+    out: Path | None = typer.Option(None, "--out", help="Write the Markdown report to this path."),
 ) -> None:
     """Check assumptions, select, and run a statistical test for a CSV."""
     mode = _validate_mode(group, value, cat1, cat2)
@@ -147,29 +161,15 @@ def analyze_csv(
         except (TypeError, ValueError, KeyError) as exc:
             raise typer.BadParameter(f"Unable to analyze numeric data: {exc}") from exc
 
-        typer.echo(f"Analysis: numeric values grouped by '{group}'")
-        typer.echo("Assumption checks:")
-        for name, details in assumptions["shapiro"].items():
-            normal = details.get("normal")
-            normal_text = "not checked" if normal is None else ("passed" if normal else "failed")
-            typer.echo(
-                f"  Shapiro-Wilk ({name}): n={details.get('n')}, "
-                f"statistic={_format_value(details.get('statistic'))}, "
-                f"p-value={_format_value(details.get('p_value'))}; {normal_text}"
-            )
-            if details.get("note"):
-                typer.echo(f"    Note: {details['note']}")
-        levene = assumptions["levene"]
-        variance = levene.get("equal_variance")
-        variance_text = "not checked" if variance is None else ("passed" if variance else "failed")
+        if out is not None:
+            _write_report(csv, mode, {"group": group, "value": value}, out)
+            typer.echo(f"Report written to {out}")
+            return
+
         typer.echo(
-            "  Levene (equal variance): "
-            f"statistic={_format_value(levene.get('statistic'))}, "
-            f"p-value={_format_value(levene.get('p_value'))}; {variance_text}"
+            build_report(csv, mode, {"group": group, "value": value}),
+            nl=False,
         )
-        if levene.get("note"):
-            typer.echo(f"    Note: {levene['note']}")
-        _print_result(selection, result)
         return
 
     assert cat1 is not None and cat2 is not None
@@ -180,16 +180,15 @@ def analyze_csv(
     except (TypeError, ValueError, KeyError) as exc:
         raise typer.BadParameter(f"Unable to analyze categorical data: {exc}") from exc
 
-    clean = frame[[cat1, cat2]].dropna()
-    table = pd.crosstab(clean[cat1], clean[cat2])
-    typer.echo(f"Analysis: categorical association between '{cat1}' and '{cat2}'")
-    typer.echo("Assumption checks:")
+    if out is not None:
+        _write_report(csv, mode, {"cat1": cat1, "cat2": cat2}, out)
+        typer.echo(f"Report written to {out}")
+        return
+
     typer.echo(
-        f"  Contingency table: {table.shape[0]} x {table.shape[1]} "
-        f"({len(clean)} complete rows)."
+        build_report(csv, mode, {"cat1": cat1, "cat2": cat2}),
+        nl=False,
     )
-    typer.echo("  Expected counts: checked to choose chi-square or Fisher's exact test.")
-    _print_result(selection, result)
 
 
 if __name__ == "__main__":

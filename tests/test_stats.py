@@ -69,9 +69,9 @@ def test_analyze_cli_runs_categorical_mode(tmp_path):
     result = CliRunner().invoke(app, ["analyze", str(csv_path), "--cat1", "cat1", "--cat2", "cat2"])
 
     assert result.exit_code == 0, result.output
-    assert "Contingency table: 2 x 2" in result.output
-    assert "Chosen test: Fisher" in result.output
-    assert "SciPy call: scipy.stats.fisher_exact" in result.output
+    assert "| Contingency table | 2 x 2" in result.output
+    assert "**Name:** Fisher" in result.output
+    assert "scipy.stats.fisher_exact" in result.output
 
 
 def test_analyze_cli_prints_assumptions_result_and_scipy_call(tmp_path):
@@ -86,14 +86,14 @@ def test_analyze_cli_prints_assumptions_result_and_scipy_call(tmp_path):
     result = CliRunner().invoke(app, ["analyze", str(csv_path), "--group", "group", "--value", "value"])
 
     assert result.exit_code == 0, result.stdout
-    assert "Assumption checks:" in result.stdout
-    assert "Chosen test:" in result.stdout
-    assert "Reason:" in result.stdout
-    assert "Statistic:" in result.stdout
-    assert "p-value:" in result.stdout
-    assert "Group sizes:" in result.stdout
-    assert "Effect size:" in result.stdout
-    assert "SciPy call: scipy.stats." in result.stdout
+    assert "## Assumption checks" in result.stdout
+    assert "**Name:**" in result.stdout
+    assert "**Reason:**" in result.stdout
+    assert "**Statistic:**" in result.stdout
+    assert "**p-value:**" in result.stdout
+    assert "**Group sizes:**" in result.stdout
+    assert "**Effect size:**" in result.stdout
+    assert "scipy.stats." in result.stdout
 
 
 def test_analyze_cli_requires_exactly_one_mode(tmp_path):
